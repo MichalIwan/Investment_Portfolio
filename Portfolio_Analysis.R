@@ -1,4 +1,4 @@
-setwd("~/Pulpit")
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 source('Functions.R')
 source('libraries.R')
 
@@ -27,8 +27,7 @@ SP500     <- c(download_stooq_index_component_data('^spx')      %>% pull(Symbol)
                download_stooq_index_component_data('^spx&l=10') %>% pull(Symbol) %>% as.character(),
                download_stooq_index_component_data('^spx&l=11') %>% pull(Symbol) %>% as.character())
 
-tickers <- c(Wig)
-
+tickers <- c(Wig_20)
 
 time_series <- tickers %>%
   lapply(download_stooq_data) %>%
@@ -36,17 +35,12 @@ time_series <- tickers %>%
 
 long_time_series <- transform_ts(time_series)
 wide_time_series <- dcast.data.table(long_time_series,
-                                     Data + Year + Quarter + Month + Day + Spolka ~ Rodzaj,
+                                     Data + Year + Quarter + Month + Spolka ~ Rodzaj,
                                      value.var = 'Cena')
 setkey(wide_time_series, Spolka)
 
 time_series_info <- Create_time_series_info(long_time_series)
 setkey(time_series_info, Spolka)
-
-time_series_info[Spolka %in% c('CCC') & Statistics %in% c('Signal_line', 'MACD') & Year > 2018]  %>%
-  dcast.data.table(Data + Year + Quarter + Month + Day + Spolka ~ Statistics, value.var = 'PnL') %>%
-  mutate(Trend = ifelse(Signal_line > MACD, 'Rosnacy', 'Spadkowy')) %>% 
-  as.data.table()
 
 # Plots
 grid.arrange(

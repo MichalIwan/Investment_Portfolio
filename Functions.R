@@ -195,46 +195,49 @@ transform_ts                              <- function(timeSeries, filter_date = 
                    id.vars = 'Data', 
                    measure.vars = c('Otwarcie', 'Najwyzszy', 'Najnizszy', 'Zamkniecie')),
             idcol = 'Spolka') %>%
-    dcast.data.table(Data + Rodzaj ~ Spolka, value.var = 'Cena') %>%
+    #dcast.data.table(Data + Rodzaj ~ Spolka, value.var = 'Cena') %>%
     lazy_dt() %>%
     mutate(Data = as.Date(Data)) %>%
-    mutate(Year = year(Data), Month = month(Data), Day = yday(Data), Quarter = quarter(Data)) %>% 
-    select(Data, Year, Quarter, Month, Day, everything()) %>%
+    mutate(Year = year(Data), Month = month(Data), Quarter = quarter(Data)) %>% 
+    select(Data, Year, Quarter, Month, everything()) %>%
     arrange(Data) %>%
-    group_by(Rodzaj) %>%
-    mutate_at(vars(-c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj')),
-              .funs = function(x){zoo::na.locf(x, na.rm = F, fromLast	= T)}) %>%
+    #group_by(Rodzaj) %>%
+    # mutate_at(vars(-c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj')),
+    #           .funs = function(x){zoo::na.locf(x, na.rm = F, fromLast	= T)}) %>%
     filter(Data >= as.Date(filter_date)) %>%
-    as.data.table %>% 
-    melt.data.table(variable.name = "Spolka",
-                    value.name = "Cena",
-                    id.vars = c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj'))
+    as.data.table #%>% 
+    #melt.data.table(variable.name = "Spolka",
+    #                value.name = "Cena",
+    #                id.vars = c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj'))
 }
 Create_time_series_info                   <- function(temp){
   data <- copy(temp)
+  
   ts_1 <- data %>% 
+    lazy_dt() %>%
     group_by(Spolka, Rodzaj) %>%
     mutate(Daily_Return = c(NA,diff(Cena)), 
            Daily_Log_Return = c(NA,diff(log(Cena)))) %>%
-    ungroup() %>%
-    gather(key = 'Statistics', value = "PnL", -c(Data, Year, Quarter, Month,  Day, Rodzaj, Spolka)) %>%
-    filter(Data < as.Date('2020-01-01')) %>%
+    as.data.table() %>%
+    melt.data.table(variable.name = 'Statistics', value.name = "PnL", id.vars = c('Data', 'Year', 'Quarter', 'Month', 'Rodzaj', 'Spolka')) %>%
+    .[Data < as.Date('2020-01-01')] %>%
     as.data.table() 
   
-  ts_2 <-  data[, .SD[seq_len(.N) == 1 | seq_len(.N) == .N], by = c('Year', 'Month', 'Spolka', 'Rodzaj')] 
-  ts_2 <- ts_2[,Monthly_return := c(NA,diff(Cena)), by =  c('Year', 'Month', 'Spolka', 'Rodzaj')][,-c('Cena')] %>%
-    melt.data.table(value.name = 'PnL', 
-                    variable.name = 'Statistics', 
-                    id.vars = c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj', 'Spolka'))
+  rm(data)
+  ts_2 <- copy(ts_1)
+  ts_3 <- copy(ts_1)
   
-  ts_3 <-  data[, .SD[seq_len(.N) == 1 | seq_len(.N) == .N], by = c('Year', 'Quarter', 'Spolka', 'Rodzaj')] 
-  ts_3 <- ts_3[,Quarterly_return := c(NA,diff(Cena)), by =  c('Year', 'Quarter', 'Spolka', 'Rodzaj')][,-c('Cena')] %>%
-    melt.data.table(value.name = 'PnL', 
-                    variable.name = 'Statistics', 
-                    id.vars = c('Data', 'Year', 'Quarter', 'Month', 'Day', 'Rodzaj', 'Spolka'))
+  ts_2 <- ts_2[Statistics %in% c('Daily_Return', 'Daily_Log_Return'), .(Data, Year, Quarter, Month, PnL = frollsum(PnL, 21, na.rm = T)), by = .(Rodzaj, Spolka, Statistics)] %>% 
+    .[Statistics == 'Daily_Log_Return', Statistics := 'Monthly_Log_Return'] %>% 
+    .[Statistics == 'Daily_Return', Statistics := 'Monthly_Return'] %>% 
+    na.omit()
   
-  return(rbindlist(list(ts_1, ts_2, ts_3)))
+  ts_3 <- ts_3[Statistics %in% c('Daily_Return', 'Daily_Log_Return'), .(Data, Year, Quarter, Month, PnL = frollsum(PnL, 63, na.rm = T)), by = .(Rodzaj, Spolka, Statistics)] %>% 
+    .[Statistics == 'Daily_Log_Return', Statistics := 'Quarterly_Log_Return'] %>% 
+    .[Statistics == 'Daily_Return', Statistics := 'Quarterly_Return'] %>% 
+    na.omit()
   
+  return(rbindlist(list(ts_1, ts_2, ts_3), use.names = TRUE))
 }
 Yearly_plot                               <- function(data, Fun = function(x){x}){
   data %>%
